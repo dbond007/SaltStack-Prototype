@@ -6,7 +6,7 @@ Enterprise-Scale SaltStack - Trivago -
 SaltConf17](https://www.youtube.com/watch?v=yWhvgLqgYR0).
 
 For information about the current structure see
-[Docs/STRUCTURE](/Docs/Structure.html).
+[Docs/Structure](/Docs/Structure.html).
 
 ---
 
