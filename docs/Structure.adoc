@@ -1,0 +1,743 @@
+// vim: set filetype=asciidoc:
+
+= Terms and Structure of the SaltStack Repository
+
+This document describes different terms used in this repository and gives an
+overview of the structure of the repository.
+
+Version:: 1.1
+
+== Overview
+
+The goals of this structure are the following:
+
+* Make it easy to reuse existing code (states and pillars)
+* Make it easy to add new and extend existing code
+* Make it easy to reason and understand what gets executed on the minion
+
+These goals are achieved by doing the following:
+
+* Defining an structure through code (topfile)
+* Using folder based matching instead of complicated topfile matching
+* Introducing the <<profile,profile>> abstraction layer
+** Describe dependencies between <<formulas,formula>>
+** Reuse and extend existing <<formulas,formula>>
+* Moving pillars from the <<global,global>> space to the <<role,role>> space
+
+This structure is inspired by the puppet structure "Roles and
+Profiles"footnote:[https://docs.puppet.com/pe/2017.1/r_n_p_intro.html].
+
+== Terms
+=== State
+Examples:: `formula.nginx.pkgs`, `profile.pkgng_cacher.cachedir`
+
+The smallest part of SaltStack where we define what should be executed on the
+minion. These can contain installing packages, rolling out configuration files
+or starting and enabling services.
+
+See also the saltstack documenation about this: link:https://docs.saltstack.com/en/latest/ref/states/writing.html[Saltstack - State Modules]
+
+==== Examples
+
+A typical state would look like this:
+
+.Template state for rolling out a configuration file
+[source,yaml]
+----
+formula.template.config:
+  file.managed:
+    - name: '{{ lookup.config.name }}'
+    - source: 'salt://{{ salt['file.join'](tpldir, "files", "config_template") }}'
+    - mode: 0644
+    - template: 'jinja'
+    - require:
+      - pkg: 'formula.template.pkg'
+    # template variables
+    - context:
+        options: {{ options }}
+----
+
+=== Formula
+Examples:: `nginx`, `apache`, `haproxy`, `php`
+
+Formulas are a collection of <<state,states>>. They describe how to install and
+manage a single application or service.
+
+For example a formula can take care of the following:
+
+* Install the right package depending on the operating system
+* Decide where to put the configuration file if needed
+* Provide reasonable defaults for the configuration if possible
+* Provide a configuration file template that can easily be extended through
+<<pillars>>
+* Start and enable services that are associated with the software
+* Restart or reload services if certain conditions are met (change in
+configuration file)
+
+WARNING: If you need to have a dependency between two formulas you should write
+a <<profile>>!
+
+==== File and folder structure
+A formula normally contains of these files and folders:
+
+`init.sls`:: Entry point for the formula that is used by salt. Here you can
+write your <<states,states>>.
+
+`map.jinja`:: Provides operating system specific defaults and general defaults
+that can be overwritten via <<pillars,pillars>>.
+
+`pillar.example`:: Contains example pillar options for the formula.
+
+`files`:: Contains all files that are used by the template. For example the
+configuration template.
+
+`README.md`:: Short description about what the formula is doing.
+
+==== Examples
+
+Contents of the `template` formula.
+
+.`init.sls`
+[source,yaml]
+----
+{#
+  import the lookup and options map from the map.jinja file.
+  tpldir is a jinja variable that gives the current folder so make it easier to
+  move states around.
+#}
+{%- from salt['file.normpath'](tpldir+"/map.jinja") import lookup -%}
+{%- from salt['file.normpath'](tpldir+"/map.jinja") import options -%}
+
+# Install packages that are defined in the lookup map in the `map.jinja` file
+formula.template.pkg:
+  pkg.installed:
+    - pkgs: {{ lookup.pkgs }}
+
+# Deploy the configuration template from `files/config_template` which renders
+# the content of the contens map from `map.jinja` as YAML.
+formula.template.config:
+  file.managed:
+    - name: '{{ lookup.config.name }}'
+    - source: 'salt://{{ salt['file.join'](tpldir, "files", "config_template") }}'
+    - mode: 0644
+    - template: 'jinja'
+    - require:
+      - pkg: 'formula.template.pkg'
+    # template variables
+    - context:
+        options: {{ options }}
+
+# Make sure that the service specified in the lookup map from `map.jinja` is
+# running and enabled. Also make sure to restart the service if the
+# configuration has changed and restart is enabled.
+formula.template.service:
+  service.running:
+    - name: '{{ lookup.service.name }}'
+    {% if lookup.service.restart %}
+    - restart: True
+    {% endif %}
+    - enable: True
+    - require:
+      - pkg: 'formula.template.pkg'
+      - file: 'formula.template.config'
+    - watch:
+      - file: 'formula.template.config'
+----
+
+.`map.jinja`
+[source,jinja]
+----
+{# lookup holds operating system specific options the lookup values can be
+overwritten by pillars in the lookup key #}
+{% set lookup = salt['grains.filter_by'](
+  {
+    'FreeBSD': {
+      'pkgs': [
+        'no_package_like_this',
+        'another_package',
+      ],
+      'config': {
+        'name': '/usr/local/etc/template.conf',
+      },
+      'service': {
+        'name': 'template_service',
+        'restart': True
+      },
+    },
+    'Debian': {
+      'pkgs': [
+        'no_package_like_this',
+        'another_package',
+      ],
+      'config': {
+        'name': '/etc/template.conf',
+      },
+      'service': {
+        'name': 'template_service',
+        'restart': True
+      },
+    },
+    'RedHat': {
+      'pkgs': [
+        'no_package_like_this',
+        'another_package',
+      ],
+      'config': {
+        'name': '/etc/template.conf',
+      },
+      'service': {
+        'name': 'template_service',
+        'restart': True
+      },
+    },
+  },
+  grain='os_family',
+  merge=salt['pillar.get']('formula.template:lookup'),
+) %}
+
+{# defaults hold default values for the options that can be overwritten by the options/pillars #}
+{% set defaults = {
+} %}
+
+{# options hold the pillar information for the formula and are defined through a pillar #}
+{% set options = salt['pillar.get']('formula.template',
+  default=defaults,
+  merge=True) %}
+----
+
+.`pillar.example`
+[source,yaml]
+----
+formula.template:
+  key: 'value'
+  map:
+    key: 'value'
+    second_key: 'second_value'
+  lists:
+    - 'this is the first element'
+    - 'this is the second element'
+----
+
+.`README.md`
+[source,md]
+----
+This is a template for a salt formula that can be used as a base for developing
+a new formula.
+----
+
+.`files/config_template`
+[source,jinja]
+----
+{{ options | yaml(False) }}
+----
+
+=== Profile
+Examples:: `trivago_default`, `appserver_php_apache`, `nginx_ssl_terminator`
+
+Profiles are an abstraction over formulas. They serve multiple purposes:
+
+* Make bundles of formulas and profiles that are often used by multiple roles
+(see <<profile-code-trivago_default-code,profile trivago_default>>)
+
+* Gluing formulas together (see <<profile-code-appserver_php_apache-code,profile
+appserver_php_apache>>)
+
+* Making it easier to reuse and extend existing formulas (see
+<<profile-code-nginx_ssl_terminator-code,profile nginx_ssl_terminator>>
+
+To use profiles in these cases solves these problems:
+
+* Inter formula dependencies which make it hard to reuse formulas in different
+ways. For example if we would combine `php` and `apache` directly we would not
+have the ability to use `php` combined with `nginx` without also using `apache`.
+* Standardized way to extend or reuse formulas which is clearly communicated.
+
+==== Examples
+===== Profile `trivago_default`
+Profile `trivago_default` bundles multiple formulas and profiles together that
+are used by almost all roles used at trivago.
+
+.`default` `init.sls`
+[source,yaml]
+----
+include:
+  - 'formula.hosts'
+  - 'profile.pkgrepo'
+  - 'formula.default_packages'
+  - 'formula.salt_minion'
+  - 'formula.sudoers'
+  - 'formula.nrpe'
+----
+
+===== Profile `appserver_php_apache`
+
+Profile `appserver_php_apache` reuses the formula `php` and `apache` and will
+automatically restart apache when the PHP configuration changes.
+
+.`appserver_php` `init.sls`
+[source,yaml]
+----
+include:
+  - 'formula.php'
+  - 'formula.apache'
+
+extend:
+  formula.apache.service:
+    # autorestart apache when php config changes
+    - watch:
+      - file: 'formula.php.config'
+----
+
+===== Profile `nginx_ssl_terminator`
+
+.`nginx_ssl_terminator` `init.sls`
+[source,yaml]
+----
+include:
+  - 'formula.nginx'
+
+extend:
+  formula.nginx.config:
+    file.managed:
+      - source: 'profile.ssl_terminator.files.config_template'
+----
+
+=== Role
+Examples:: `pricesearch_server`, `ssl_terminator`, `saltmaster_dev`
+
+Roles include <<profiles,profile>> and <<formulas,formula>> to describe the
+business function of a minion.
+
+A minion can only have one role at the same time and are used for the _matching_
+inside the <<states,states>> and <<pillars,pillars>> topfile.
+
+==== Examples
+===== Role `saltmaster_dev`
+
+`saltmaster_dev` deploys a saltmaster and multiple jails on a minion to make it
+easy to develope saltstack states and pillars.
+
+.Statefile for `saltmaster_dev`
+[source,yaml]
+----
+include:
+  - 'profile.default'
+  - 'profile.pkgng_cacher'
+  - 'formula.salt_master'
+  - 'formula.salt_api'
+  - 'profile.jailmaster'
+  - 'formula.salt-compressor'
+----
+
+.Pillarfile for `saltmaster_dev`
+[source,yaml]
+----
+include:
+  - 'preset.datacenter_defaults'
+  - 'role.saltmaster_dev.base'
+----
+
+=== Environment
+Examples:: `dev`, `stage`, `prod`
+
+Environments define in what kind of _stage_ the minion is in. Is it a
+development machine or a production machine.
+
+This makes it easy to make small behavior changes that are desirable in a
+_development environment_ but not in a _production environment_.
+
+==== Examples
+===== Configcheck on rollout
+
+For example if you develop a new state. You have a configuration check which
+checks the validity of a configuration file before rolling it out. You also have
+a template that gets rendered depending on <<pillar,pillar>> options.
+
+You now want to see the output of the template after applying the pillar
+options. If you make an error the configuration check will catch that and not
+deploy the rendered configuration file to the machine. This makes it hard to
+debug and fix the problem.
+
+In a production environment this is a desirable thing as it prevents errors that
+could lead to downtime. In a development environment this is annoying as it
+prevents you to see the actual output of your configuration file.
+
+You can now define in your pillars that the configuration check should only be
+run in production environments but not in development environments.
+
+This makes it easier to develop new states but still have good error checks in
+production.
+
+In code it could look like this:
+
+.Haproxy formula config state
+[source,yaml]
+----
+formula.haproxy.config:
+  file.managed:
+    - name: '{{ lookup.config.name }}'
+    - source: 'salt://{{ salt['file.join'](tpldir, "files", "config_template") }}'
+    {% if lookup.config.check %}
+    - check_cmd: '{{ lookup.service.name }} -c -f'
+    {% endif %}
+----
+
+.Global dev environment pillar
+[source,yaml]
+----
+formula.haproxy:
+  lookup:
+    config:
+      check: False
+----
+
+.Global prod environment pillar
+[source,yaml]
+----
+formula.haproxy:
+  lookup:
+    config:
+      check: True
+----
+
+=== Realm
+Examples:: `dus`, `dus.frontend`, `dus.backbone`, `sfo`, `hkg`,
+`eu.dus.office.deepgrey.thaller.saltmaster_dev`
+
+Realms describe the geographical or logical location of the minion. They are
+used to change settings of the minion depending on their surrounding. If a
+minion is in the _hkg datatacenter_ it needs different IPs for its DNS and NTP
+server then a minion in the _sfo datacenter_.
+
+Realms should be treated as a _logical_ environment but are usually encoded in a
+_geographical_ location. This is mostly to make it easier to understand where a
+server is and follows our usual naming structure.
+
+Realms are hierarchically structured and should be separated by a `.` (dot). So
+for example the realm `eu.dus` is a subrealm of the realm `eu`. For more
+information on how realms are used see the <<folders>> section under
+<<pillars>>.
+
+[CAUTION]
+====
+Realms should *not* be used to to differentiate between _dev_ and
+_prod_ environments.
+
+If you have behavior changes use a different <<role,role>> or an
+<<environment,environment>>.
+
+They can be used to setup a development realm which brings for example
+different IPs or endpoints with it.
+====
+
+[IMPORTANT]
+====
+If you want to have different settings than an existing realm its a new realm!
+====
+
+==== Examples
+`dus`:: Used by the Düsseldorf datacenter
+`sfo`:: User by the San Francisco datacenter
+`trv-dus-dg`:: Used by the Deep Grey office in Düsseldorf
+
+== Structure
+
+----
+saltstack
+├── pillars
+│   ├── global
+│   │   ├── environment
+│   │   ├── id
+│   │   └── realm
+│   ├── preset
+│   └── role
+│       └── <role>
+│           ├── environment
+│           ├── id
+│           └── realm
+└── states
+    ├── formula
+    ├── profile
+    └── role
+----
+
+=== States
+
+.States dependencies generated by `graph_states_dependencies`
+image::states_dependencies.svg[States dependencies]
+
+Folders:: `formula`, `profile`, `role`
+
+States have a relatively simple structure. They just match the <<role,role>>
+grain of the minion to the files and folders in the `role` folder.
+
+----
+states
+├── formula
+│   ├── default_packages
+│   ├── haproxy
+│   ├── hosts
+│   └── nginx
+├── profile
+│   ├── loadbalancer_datacenter
+│   └── trivago_default
+└── role
+    ├── loadbalancer_datacenter
+    └── ssl_terminator
+----
+
+For example if the role of the minion is `ssl_terminator` then
+`role.ssl_terminator` will be used.
+
+The role file then includes <<formula,formulas>> and <<profile,profiles>>:
+
+.Role file `role.ssl_terminator`
+[source,yaml]
+----
+include:
+  - 'profile.default'
+  - 'profile.ssl_terminator'
+----
+
+=== Pillars
+
+Folders:: `global`, `preset`, `role`
+
+Pillars have a more complicated structure than <<states,states>>. They provide
+a structured configuration for the states. As they are structured it's  easy to
+extend and overwrite them.
+
+[CAUTION]
+====
+The behavior of the pillars can heavily depend on the configuration of the
+saltmaster. See
+link:https://docs.saltstack.com/en/latest/ref/configuration/master.html#pillar-merging-options[Pillar
+Merging Options] for more information.
+
+On our saltmaster's we usually set the following options:
+
+.Usual pillar settings for saltmaster
+[source,yaml]
+----
+# Recursively merge pillar data
+pillar_source_merging_strategy: 'recurse'
+
+# Recursively merge lists by aggregating them instead of replacing them.
+pillar_merge_lists: True
+----
+====
+
+==== Folders
+===== Global
+
+IMPORTANT: Global pillar should be avoided as much as possible and should only
+be used when absolutely necessary. Not all minions need all pillars all the time
+and globals make it harder to determine where pillars come from If you can put
+the pillars you want to add under the same folder in your <<role,role>>.
+
+Examples:: `global.realm.dus.frontend`, `global.environment.dev`,
+`global.id.ssl-ter0-dus`
+
+Stores pillars that are used between multiple roles.
+
+Global provides three folders to match pillars to a minion:
+
+`environment`:: Will match against the <<environment,environment>> grain of the
+minion. Should only contain small behavior changes like not auto-restarting
+_apache_ in `prod` when the configuration file changes.
+`realm`:: Will match against the <<realm,realm>> grain of the minion. Contains
+information about the "surrounding" of the minion like _dns server_ or _kafka
+server_.
++
+The realms are hierarchically structured with subfolders:
++
+----
+realm
+├── eu
+│   ├── ams
+│   │   └── office
+│   └── dus
+│       ├── datacenter
+│       │   ├── backend
+│       │   └── frontend
+│       └── office
+│           └── deepgrey
+└── north_america
+    ├── dca
+    │   └── datacenter
+    └── sfo
+        └── datacenter
+----
++
+Pillars defined in the realm `eu` would be inherited by the realms `eu.ams` and
+`eu.dus`. Pillars defined in a lower level for example `eu.ams` will overwrite
+pillars inherited by `eu`.
++
+For example if you have the following pillars defined:
++
+.`eu`
+[source,yaml]
+----
+formula.example:
+  key1: 'value1'
+  key2: 'value2'
+----
++
+.`eu.dus`
+[source,yaml]
+----
+formula.example:
+  key1: 'value3'
+----
++
+The resulting pillar for a minion in the `eu.dus` realm would be the following:
++
+[source,yaml]
+----
+formula.example
+  key1: 'value3'
+  key2: 'value2'
+----
+
+`id`:: Will match against a specific minion ID.
+
+===== Preset
+
+Examples:: `preset.datacenter_defaults`, `preset.dev_ssl_cert`
+
+Contains preset pillar files that are reusable between multiple roles.
+
+They make it easier to opt-in to pillars instead of having a default matching,
+but still having a way to share pillars between roles.
+
+They contain defaults we want to have on all minions. Good example are
+`nrpe` pillars which enable checks we want to have enabled on all minions.
+
+They also contain pillars that are useful to different minions but are not
+needed on all minions. For example the `dev_ssl_cert` contains a valid
+certificate that can be used for when applications get tested against HTTPs.
+
+They can be `include` files or their own pillar entry files.
+
+==== Examples
+===== Preset `datacenter_defaults`
+
+[source,yaml]
+----
+# default trivago options
+
+include:
+  - 'preset.pkgng_repos'
+  - 'preset.nrpe_sudo'
+----
+
+===== Preset `pkgng_repos`
+
+[source,yaml]
+----
+formula.pkgng:
+  repos:
+    FreeBSD:
+      enabled: 'no'
+    trivago:
+      url: 'http://pkgmirror.trivago.trv/103x64/default'
+      mirror_type: 'http'
+      signature_type: 'pubkey'
+      pubkey: '/etc/ssl/pkg.cert'
+      enabled: 'yes'
+    trivago-php:
+      url: 'http://pkgmirror.trivago.trv/103x64/php5/'
+      mirror_type: 'http'
+      signature_type: 'pubkey'
+      pubkey: '/etc/ssl/pkg.cert'
+    trivago-php7:
+      url: 'http://pkgmirror.trivago.trv/103x64/php7/'
+      mirror_type: 'http'
+      signature_type: 'pubkey'
+      pubkey: '/etc/ssl/pkg.cert'
+    ssl_terminator:
+      url: 'http://pkgmirror.trivago.trv/103x64/libressl/'
+      mirror_type: 'http'
+      signature_type: 'pubkey'
+      pubkey: '/etc/ssl/pkg.cert'
+----
+
+===== Role
+Examples:: `role.loadbalancer_datacenter`, `role.saltmaster_dev`,
+`role.ssl_terminator`
+
+Contains the role pillars that are matched to the <<role,role>> of the minion.
+
+They mirror the structure from the <<global,global pillars>>:
+
+----
+role
+└── loadbalancer_datacenter
+    ├── environment
+    │   ├── dev
+    │   └── prod
+    ├── id
+    │   ├── lb0-dus
+    │   └── lb1-dus
+    └── realm
+        ├── asia
+        │   └── hkg
+        ├── eu
+        │   ├── ams
+        │   └── dus
+        └── north_america
+            ├── dca
+            └── sfo
+----
+
+This has the purpose to contain pillars to their role. This makes it easier to
+find the pillar files for the specific role. It also avoids unnecessary clutter
+in the pillars as only role that needs the pillars gets the pillars.
+
+When pillars need to be used by multiple roles there are two ways:
+
+* Define a <<global,global>> pillar applicable to the scope that is needed. This
+should be avoided if possible.
+* Define a <<preset,preset>> pillar that is then included into the role pillar.
+This is done like this:
++
+.Role `ssl_terminator` pillar `init.sls`
+[source,yaml]
+----
+include:
+  - 'preset.datacenter_defaults'
+  - 'role.ssl_terminator.base'
+----
+
+==== Matching
+The following grains are used for matching:
+
+`role`:: The <<role>> of the server.
+`environment`:: The <<environment>> of the server.
+`realm`:: The <<realm>> of the server.
+
+They will be matched in this order:
+
+. `role.<role>`
+. `global.realm.<realm>`
+. `role.<role>.realm.<realm>`
+. `global.environment.<environment>`
+. `role.<role>.environment.<environment>`
+. `global.id.<id>`
+. `role.<role>.id.<id>`
+
+The matching will also happen in the same order for `_secret` as a prefix where
+our pillars reside that are not included in the normal repository.
+
+// TODO: Add example with specific grains that shows where stuff will be put and
+// why they where put there.
+//== Examples
+//=== Role `saltmaster_dev` in realm `dus` with environment `prod`
+
+== Links
+
+* link:https://www.youtube.com/watch?v=yWhvgLqgYR0[Best Practices for Enterprise-Scale SaltStack - Trivago - SaltConf17]
+
+== Authors
+
+* Alexander Thaller <alexander.thaller@trivago.com>

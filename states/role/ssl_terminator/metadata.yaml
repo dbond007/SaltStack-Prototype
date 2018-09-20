@@ -1,0 +1,7 @@
+name: ssl_terminator
+description: Role for the ssl termination machines that turn HTTPs into HTTP.
+  Basically this role is an nginx server with all our ssl certificates that
+  takes incoming HTTPs traffic, decrypts it and uses our loadbalancer_datacenter
+  role as an upstream to forward the HTTP traffic to.
+maintainers:
+  - alexander@thaller.ws
