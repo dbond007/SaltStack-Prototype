@@ -1,0 +1,9 @@
+##TODO get data from pillar (stored in vault) or from hashicorp vault
+##If in pillar maybe can store in list and loop through so nothing here but scrip to loop
+vcenter01:
+  driver: vmware
+  user: 'DOMAIN\user'
+  password: 'verybadpass'
+  url: 'vcenter01.domain.com'
+  protocol: 'https'
+  port: 443
