@@ -1,0 +1,10 @@
+include:
+  - 'formula.ssl_certs'
+  - 'formula.nginx'
+
+extend:
+  formula.nginx.config:
+    file.managed:
+      - source: 'salt://profile/nginx_ssl/files/config'
+      - context:
+          options: {{ options }}

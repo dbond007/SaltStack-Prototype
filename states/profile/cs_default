@@ -1,0 +1,4 @@
+include:
+  - 'formula.hosts'
+  - 'formula.default_packages'
+  - 'formula.ssh_authorized_keys'
