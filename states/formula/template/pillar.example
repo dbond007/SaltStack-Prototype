@@ -1,0 +1,8 @@
+formula.template:
+  key: 'value'
+  map:
+    key: 'value'
+    second_key: 'second_value'
+  lists:
+    - 'this is the first element'
+    - 'this is the second element'

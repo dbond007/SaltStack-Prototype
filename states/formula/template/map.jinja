@@ -1,0 +1,56 @@
+{# lookup holds operating system specific options the lookup values can be
+overwritten by pillars in the lookup key #}
+{% set lookup = salt['grains.filter_by'](
+  {
+    'FreeBSD': {
+      'pkgs': [
+        'no_package_like_this',
+        'another_package',
+      ],
+      'config': {
+        'name': '/usr/local/etc/template.conf',
+      },
+      'service': {
+        'name': 'template_service',
+        'restart': True
+      },
+    },
+    'Debian': {
+      'pkgs': [
+        'no_package_like_this',
+        'another_package',
+      ],
+      'config': {
+        'name': '/etc/template.conf',
+      },
+      'service': {
+        'name': 'template_service',
+        'restart': True
+      },
+    },
+    'RedHat': {
+      'pkgs': [
+        'no_package_like_this',
+        'another_package',
+      ],
+      'config': {
+        'name': '/etc/template.conf',
+      },
+      'service': {
+        'name': 'template_service',
+        'restart': True
+      },
+    },
+  },
+  grain='os_family',
+  merge=salt['pillar.get']('formula.template:lookup'),
+) %}
+
+{# defaults hold default values for the options that can be overwritten by the options/pillars #}
+{% set defaults = {
+} %}
+
+{# options hold the pillar information for the formula and are defined through a pillar #}
+{% set options = salt['pillar.get']('formula.template',
+  default=defaults,
+  merge=True) %}
