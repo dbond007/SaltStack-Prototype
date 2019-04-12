@@ -1,9 +1,9 @@
-{# version set as a grain for the minion #}
-
+{# The version is set as a grain for the minion on where to get its config #}
 
 {% set structure = salt['grains.get']('structure', 'v1') %}
 {% if structure == 'v1' %}
 
+{# Original monolithic Salt top file goes here #}
 
 {% endif %}
 
