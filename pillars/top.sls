@@ -21,4 +21,4 @@
   {% for r in reamls -%}
   {% set subrealm = realms[0:loop.index] | join('.') -%}
   - 'role.{{ role }}.realm.{{ subrealm }}
-  {% endofr -x}
+  {% endfor -x}
