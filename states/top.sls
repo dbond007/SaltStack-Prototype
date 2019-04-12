@@ -1,4 +1,4 @@
-## version set as a grain for the minion
+{# version set as a grain for the minion #}
 
 
 {% set structure = salt['grains.get']('structure', 'v1') %}
