@@ -6,7 +6,7 @@ Enterprise-Scale SaltStack - Trivago -
 SaltConf17](https://www.youtube.com/watch?v=yWhvgLqgYR0).
 
 For information about the current structure see
-[Docs/Structure](/Docs/Structure.html).
+[Docs/Structure](/Docs/Structure.adoc).
 
 Work on this is to add default formulas that can be reused within this format along with implementing reactors and cloud providers.
 Integration with vault for secure secret storage and a boot strap for setting all this up on a salt master.
